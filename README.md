@@ -35,7 +35,7 @@ A background poller (every `POLL_SECONDS`, default 30) calls `get_transfers`
 **recomputes each order's totals from that response alone**. Entries with
 `subaddr_index.major` other than 0, and entries with `double_spend_seen: true`,
 are not counted. Confirmations come from each entry's own `confirmations`
-field.
+field; `pool` entries carry none, so they count as 0.
 
 The `credits` table is an append-only audit log of every transfer seen
 (`txid` + minor index, `height` and `confirmations` refreshed on later
@@ -73,19 +73,16 @@ that.
 
 You need `monerod` and `monero-wallet-rpc` from the Monero project, running
 on stagenet. Download them from https://www.getmonero.org/downloads/.
-Flags marked "check with --help" were not found on the wallet-rpc docs page
-and may differ between versions.
+Every flag below was checked with `--help` on v0.18.5.3.
 
-1. Start the daemon (`--stagenet`: check with --help):
+1. Start the daemon:
 
    ```sh
    monerod --stagenet
    ```
 
 2. Start wallet-rpc with a wallet directory. The docs say `--wallet-dir` is
-   required for creating wallets over RPC. The wallet-rpc docs mention
-   `--rpc-login username:password`; the other flags below are "check with
-   --help":
+   required for creating wallets over RPC.
 
    ```sh
    monero-wallet-rpc --stagenet \
@@ -96,7 +93,7 @@ and may differ between versions.
    ```
 
    This example does not implement HTTP digest auth, so for local testing
-   you may start it with `--disable-rpc-login` instead (check with --help).
+   you may start it with `--disable-rpc-login` instead.
    Keep wallet-rpc on 127.0.0.1 behind your own network boundary.
 
 3. Create the view-only wallet with the `generate_from_keys` method. Use the
@@ -117,9 +114,12 @@ and may differ between versions.
    ```
 
    (Add `--user user:pass --digest` to curl if you started wallet-rpc with
-   `--rpc-login`.) The docs do not say whether the new wallet is left open
-   for the following calls; if `create_address` complains that no wallet is
-   open, call `open_wallet` with the same `filename` and `password`.
+   `--rpc-login`.) On v0.18.5.3 the new wallet is left open, so
+   `create_address` works straight after this call. The docs do not promise
+   that; if another version says no wallet is open, call `open_wallet` with
+   the same `filename` and `password`. On the view-only wallet, `query_key`
+   with `spend_key` fails with "The wallet is watch-only", which is how you
+   confirm it cannot spend.
 
 4. Start the checkout server:
 
@@ -182,19 +182,41 @@ transfer, and this example uses it directly.
   does not implement it. Protect the network path yourself.
 - **Single wallet account** (account_index 0). Subaddresses are created
   under that one account.
-- **Not audited.** Tested against a stub of monero-wallet-rpc built from the
-  docs' own example responses. Not reviewed by a third party.
+- **Not audited.** Unit-tested against a stub of monero-wallet-rpc and run
+  end to end on a private regtest chain (see Status). Not reviewed by a third
+  party.
+- **A reorg after `paid` does not un-pay an order.** Checked on regtest: after
+  `pop_blocks` removed the confirmations, and even after the transaction was
+  gone from the wallet, the order stayed `paid`. Paid orders are not polled
+  again. Pick `REQUIRED_CONFIRMATIONS` with that in mind.
 - **One checkout server.** No horizontal scaling, no queue, no retries
   beyond the simple interval poller.
 
 ## Status
 
-Unit-tested against a stub of monero-wallet-rpc built from the official
-docs. **NOT yet run end to end on stagenet; that run is the next step.**
-
-An earlier draft used response shapes that did not match the docs; an independent review caught it before publishing, and the stub is now built from the docs' own example responses.
+- **Run end to end on regtest** with the real `monerod` and
+  `monero-wallet-rpc` v0.18.5.3 (official macOS x64 release, SHA-256
+  checked): 44 checks, 0 failed. It covers exact payment, underpayment then
+  top-up, overpayment, two orders kept apart, restart on the same database,
+  a pool transaction dropped with `flush_txpool`, a reorg with `pop_blocks`,
+  expiry then a late payment, and a total above 2^53 piconero. Regtest is a
+  private local chain made of the same binaries; coins are mined locally, so
+  no faucet is involved. How to re-run it: [e2e/README.md](e2e/README.md).
+- **The run found a real bug, now fixed.** Real wallet-rpc sends `pool`
+  entries with no `confirmations` field at all (`type: "pool"`, `height: 0`).
+  The stub, built from the docs' examples, always had one. With a payment
+  sitting in the pool, every poll failed on a SQLite bind error, so all open
+  orders stopped updating until the transaction was mined. `getTransfers()`
+  now treats a missing `confirmations` as 0, and a unit test uses the real
+  shape.
+- **Not yet run on stagenet** or on any public network.
+- Unit tests: 37, against a stub of monero-wallet-rpc. An earlier draft used
+  response shapes that did not match the docs; an independent review caught
+  it before publishing.
 
 ## Tests
+
+Unit tests (no Monero binaries needed):
 
 ```sh
 node --test
@@ -205,6 +227,16 @@ The tests start a fake wallet-rpc on `127.0.0.1` (random port) whose
 (the docs page prints `"amounts" [..]` without a colon; the colon is added),
 then varied. The real client, the real poller logic and the HTTP server are
 exercised. Nothing leaves the machine.
+
+End to end, against real `monerod` and `monero-wallet-rpc` on a private
+regtest chain (about 4 minutes; you download and hash-check the Monero CLI
+yourself):
+
+```sh
+MONERO_BIN_DIR=/path/to/monero-bin node e2e/regtest.mjs
+```
+
+Details and the scenario list: [e2e/README.md](e2e/README.md).
 
 ## API
 

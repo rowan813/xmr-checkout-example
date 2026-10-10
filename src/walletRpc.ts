@@ -28,7 +28,10 @@ export interface Transfer {
   amount: bigint;
   /** If several outputs were received, each one individually. */
   amounts?: bigint[];
-  /** Blocks mined since the block containing the tx (0 while in the pool). */
+  /**
+   * Blocks mined since the block containing the tx. Real wallet-rpc OMITS this
+   * field on "pool" entries; getTransfers() fills in 0 so it is always a number.
+   */
   confirmations: number;
   /** True if the key image(s) of this transfer were seen before. */
   double_spend_seen: boolean;
@@ -117,12 +120,16 @@ export class WalletRpcClient {
   }
 
   /** Incoming transfers, confirmed ("in") and mempool ("pool"), for account 0. */
-  getTransfers(subaddrIndices: number[]): Promise<GetTransfersResult> {
-    return this.call("get_transfers", {
+  async getTransfers(subaddrIndices: number[]): Promise<GetTransfersResult> {
+    const result = await this.call<GetTransfersResult>("get_transfers", {
       in: true,
       pool: true,
       account_index: 0,
       subaddr_indices: subaddrIndices,
     });
+    // Pool entries carry no "confirmations" key (verified against monero-wallet-rpc
+    // v0.18.5.3). Unmined means 0 confirmations.
+    const fill = (list?: Transfer[]) => list?.map((t) => ({ ...t, confirmations: t.confirmations ?? 0 }));
+    return { in: fill(result.in), pool: fill(result.pool) };
   }
 }

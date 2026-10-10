@@ -172,6 +172,24 @@ test("a pool tx is 'seen'; a pool double spend is ignored and flagged", async ()
   assert.equal(view.received_atomic, "500000000000");
 });
 
+test("a pool entry WITHOUT a confirmations field (as real wallet-rpc sends it) is seen at 0 confirmations", async () => {
+  // Real monero-wallet-rpc v0.18.5.3 omits "confirmations" from "pool" entries
+  // (they carry type "pool", height 0 and no confirmations key at all).
+  const minor = await newOrder("o1", "0.5");
+  const entry = transfer(minor, { height: 0, type: "pool" });
+  delete entry.confirmations;
+  wallet.state.pool.push(entry);
+
+  assert.equal(await checkout.pollOnce(), true);
+  const view = checkout.view("o1")!;
+  assert.equal(view.status, "seen");
+  assert.equal(view.received_atomic, "500000000000");
+  assert.equal(view.confirmed_atomic, "0");
+  assert.equal(view.confirmations, 0);
+  assert.equal(store.auditLog(minor).length, 1);
+  assert.equal(store.auditLog(minor)[0]!["confirmations"], 0);
+});
+
 test("a confirmed double spend never pays an order", async () => {
   const minor = await newOrder("o1", "0.5");
   wallet.state.in.push(transfer(minor, { double_spend_seen: true }));
