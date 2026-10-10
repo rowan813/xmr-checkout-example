@@ -1,0 +1,15 @@
+{
+  "name": "xmr-checkout-example",
+  "version": "0.1.0",
+  "description": "A small, honest example of accepting Monero for orders: one subaddress per order, view-only wallet, SQLite credits.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "license": "MIT"
+}
